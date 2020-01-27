@@ -156,3 +156,93 @@ def a_star(grid, h, start, goal):
 def heuristic(position, goal_position):
     return np.linalg.norm(np.array(position) - np.array(goal_position))
 
+
+def path_pruning(path, epsilon=1e-3):
+    
+    i=0
+    pruned_path=[p for p in path]
+    while i < len(pruned_path) - 2:
+
+        det = np.linalg.det( np.concatenate((
+            np.array([pruned_path[i  ][0], pruned_path[i  ][1], 1.]).reshape(1, -1),
+            np.array([pruned_path[i+1][0], pruned_path[i+1][1], 1.]).reshape(1, -1),
+            np.array([pruned_path[i+2][0], pruned_path[i+2][1], 1.]).reshape(1, -1)
+            ), 0))
+
+        if abs(det) < epsilon:
+            pruned_path.remove(pruned_path[i+1])
+        else:
+            i +=1
+    pruned_path = [tuple(p) for p in pruned_path]
+
+    return pruned_path
+
+
+def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
+
+    #Check whether goal location is inside the grid
+    if (p[0]<0 or p[0]>g.shape[0]-1 or
+        p[1]<0 or p[1]>g.shape[1]-1 or
+        g[p[0]][p[1]]):
+        print('\nError: Specified goal is invalid. Looking for nearby location..\n')
+        
+        is_valid = False
+        i = 0
+        while is_valid==False or i<len(r):
+            new_p = find_valid_grid_location(p, g, r = r[i])
+            if len(new_p)>0:
+                p=new_p
+                is_valid = True
+            i+=1
+        if is_valid:
+            print('..found a valid goal: {}'.format(p))
+        else:
+            p = s
+            print('..found no valid goal. Resetting goal to current location: {}'.format(p))
+
+    return p
+
+
+def find_valid_grid_location(p, g, r = 10):
+
+    corners = [p[0]-r, p[0]+r,
+               p[1]-r, p[1]+r]
+
+    if corners[0]<0:
+        corners[0]=0
+
+    if corners[0]>g.shape[0]-1:
+        corners[0]=g.shape[0]-1
+
+    if corners[1]<0:
+        corners[1]=0
+
+    if corners[1]>g.shape[0]-1:
+        corners[1]=g.shape[0]-1
+
+    if corners[2]<0:
+        corners[2]=0
+
+    if corners[2]>g.shape[1]-1:
+        corners[2]=g.shape[1]-1
+
+    if corners[3]<0:
+        corners[3]=0
+
+    if corners[3]>g.shape[1]-1:
+        corners[3]=g.shape[1]-1
+
+    locs = {}
+
+    for i in range(corners[0], corners[1] + 1):
+        for j in range(corners[2], corners[3] + 1):
+            if g[i][j]==False:
+                locs[(i,j)]=np.linalg.norm(np.array([i, j]) - np.array(p))
+
+    if len(locs)>0:
+        locs = {k: v for k, v in sorted(locs.items(), key=lambda item: item[1])}
+        return list(locs.keys())[0]
+    else:
+        return []
+
+
