@@ -77,103 +77,126 @@ Finally, the waypoints are send to the simulator and the drone transitions to ta
 
 
 
-
-
 ### Implementing Your Path Planning Algorithm
 
 #### 1. Set your global home position
 Here students should read the first line of the csv file, extract lat0 and lon0 as floating point values and use the self.set_home_position() method to set global home. Explain briefly how you accomplished this in your code.
 
-I read from colliders.csv all rows as string and for the first row removed all characters of no interest and finally converted the string representation of the lat0 and lon0 to float. 
+I read colliders.csv as string and convert the values in the first row to latitude and longitude as float:
 
->> (lat0, lon0) = [ np.float64(s.split(' ')[1]) for s in np.loadtxt(
->>     'colliders.csv', delimiter='\n', dtype='str')[0].split(', ') ]
+    (lat0, lon0) = [ np.float64(s.split(' ')[1]) for s in 
+    np.loadtxt('colliders.csv', delimiter='\n', dtype='str')[0].split(', ') ]
         
-I then set the global home position using the set_home_position function
+Next, I set the global home position to these latitude and longitude coordinates and an altitude of zero (at the ground):
 
->> self.set_home_position(lon0, lat0, 0.)
+    self.set_home_position(lon0, lat0, 0.)
+
 
 
 
 #### 2. Set your current local position
 Here as long as you successfully determine your local position relative to global home you'll be all set. Explain briefly how you accomplished this in your code.
 
-I use the function global_to_local from udacidrone.frame_utils, which converts current GPS global position to NED local position based on global home position information:
+I can either use *self.local_position* or the  *global_to_local()* function from frame_utils.py to convert current global position to local position:
 
->> local_position = global_to_local(self.global_position, self.global_home)
+    local_position = global_to_local((self._longitude, self._latitude, self._altitude), self.global_home)
 
-
+    
 
 #### 3. Set grid start position from local position
 This is another step in adding flexibility to the start location. As long as it works you're good to go!
 
-I set grid_start to current_location in grid coordinates
+I set grid_start to the current local position, which needs to be given as integer values to work:
 
->>grid_start = (int(self.local_position[0] - north_offset),  
->>               int(self.local_position[1] - east_offset))
+    grid_start = (int(self.local_position[0] - north_offset), int(self.local_position[1] - east_offset))
 
 
 
 #### 4. Set grid goal position from geodetic coords
 This step is to add flexibility to the desired goal location. Should be able to choose any (lat, lon) within the map and have it rendered to a goal location on the grid.
 
-I need to convert the given geodetic coordinates (longitude, latitude, and target altitude) to local coordinates using the global_to_local function. I then convert local goal coordinats to grid coordinates
+Taking some longitude and latitude location as input, i convert these geodetic coordinates, together with the target altitude to local coordinates, and subsequently to grid coordinates: 
 
->>lon =  -122.3976
->>lat = 37.7926
->>
->>local_goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)
->>grid_goal = (int(local_goal[0] - north_offset), 
->>             int(local_goal[1] - east_offset))
+    (lat, lon) =(37.793448, -122.398147)
+    local_goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)
+    grid_goal = (int(local_goal[0] - north_offset), int(local_goal[1] - east_offset))
+
+In order to make sure that the specified goal location is valid, i created a method that checks the grid location, and if it collides with occupied space, searches for the nearest unoccupied location and sets this as the corrected goal location:
+
+  grid_goal = grid_goal_verification(grid_goal, grid_start, grid)  
+
+And here the function implemented in planning_utils.py:
+
+  def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
+    if (p[0]<0 or p[0]>g.shape[0]-1 or
+        p[1]<0 or p[1]>g.shape[1]-1 or
+        g[p[0]][p[1]]):
+        print('Invalid goal location. Looking for nearby location..')
+        
+        is_valid = False
+        i = 0
+        while is_valid==False or i<len(r):
+            new_p = find_valid_grid_location(p, g, r = r[i])
+            if len(new_p)>0:
+                p=new_p
+                is_valid = True
+            i+=1
+        if is_valid:
+            print('..found a valid goal: {}'.format(p))
+        else:
+            p = s
+            print('..found no valid goal. Resetting goal to current location: {}'.format(p))
+    return p
 
 
 
 #### 5. Modify A* to include diagonal motion (or replace A* altogether)
 Minimal requirement here is to modify the code in planning_utils() to update the A* implementation to include diagonal motions on the grid that have a cost of sqrt(2), but more creative solutions are welcome. Explain the code you used to accomplish this step.
 
-As a first solution, i simply added four diagonal actions to the Action class:
+I simply added four diagonal actions to the Action class:
 
->>    NORTH_WEST = (-1, -1, np.sqrt(2))
->>    NORTH_EAST = (-1, 1, np.sqrt(2))
->>    SOUTH_WEST = (1, -1, np.sqrt(2))
->>    SOUTH_EAST = (1, 1, np.sqrt(2))
+    NORTH_WEST = (-1, -1, np.sqrt(2))
+    NORTH_EAST = (-1, 1, np.sqrt(2))
+    SOUTH_WEST = (1, -1, np.sqrt(2))
+    SOUTH_EAST = (1, 1, np.sqrt(2))
 
-and added conditions for removing those actions in the valid_actions method:
+and added conditional checks for removing those actions from the valid_actions list in the valid_actions function:
 
->>    if (x - 1 < 0 or y - 1 < 0) or grid[x - 1, y - 1] == 1:
->>        valid_actions.remove(Action.NORTH_WEST)
->>    if (x - 1 < 0 or y + 1 > m) or grid[x - 1, y + 1] == 1:
->>        valid_actions.remove(Action.NORTH_EAST)
->>    if (x + 1 > n or y - 1 < 0) or grid[x + 1, y - 1] == 1:
->>        valid_actions.remove(Action.SOUTH_WEST)
->>    if (x + 1 > n or y + 1 > m) or grid[x + 1, y + 1] == 1:
->>        valid_actions.remove(Action.SOUTH_EAST)
-
+    if (x - 1 < 0 or y - 1 < 0) or grid[x - 1, y - 1] == 1:
+      valid_actions.remove(Action.NORTH_WEST)
+    if (x - 1 < 0 or y + 1 > m) or grid[x - 1, y + 1] == 1:
+      valid_actions.remove(Action.NORTH_EAST)
+    if (x + 1 > n or y - 1 < 0) or grid[x + 1, y - 1] == 1:
+      valid_actions.remove(Action.SOUTH_WEST)
+    if (x + 1 > n or y + 1 > m) or grid[x + 1, y + 1] == 1:
+      valid_actions.remove(Action.SOUTH_EAST)
 
 
 
 #### 6. Cull waypoints 
 For this step you can use a collinearity test or ray tracing method like Bresenham. The idea is simply to prune your path of unnecessary waypoints. Explain the code you used to accomplish this step.
 
-I removed waypoints by testing for collinearity by computing the determinant of three consecutive points, and if it fell below a specified value (epsilon parameter), the middle point was removed:
+I wrote a function for remove waypoints using collinearity checks:
 
+     path = path_pruning(path, epsilon=0.1)
 
->>         epsilon = 1e-3
->>         i=0
->>         pruned_path=[p for p in path]
->>         while i < len(pruned_path) - 2:
->> 
->>             det = np.linalg.det( np.concatenate((
->>                 np.array([pruned_path[i  ][0], pruned_path[i  ][1], 1.]).reshape(1, -1),
->>                 np.array([pruned_path[i+1][0], pruned_path[i+1][1], 1.]).reshape(1, -1),
->>                 np.array([pruned_path[i+2][0], pruned_path[i+2][1], 1.]).reshape(1, -1)
->>                 ), 0))
->> 
->>             if abs(det) < epsilon:
->>                 pruned_path.remove(pruned_path[i+1])
->>             else:
->>                 i +=1
->>         path = [tuple(p) for p in pruned_path] 
+And here the function implemented in planning_utils.py. I iteratively check three subsequent points for collinearity and given a certain threshold (epsilon) remove the middle point:
+
+    def path_pruning(path, epsilon=1e-3):
+      i=0
+      pruned_path=[p for p in path]
+      while i < len(pruned_path) - 2:
+          det = np.linalg.det( np.concatenate((
+              np.array([pruned_path[i  ][0], pruned_path[i  ][1], 1.]).reshape(1, -1),
+              np.array([pruned_path[i+1][0], pruned_path[i+1][1], 1.]).reshape(1, -1),
+              np.array([pruned_path[i+2][0], pruned_path[i+2][1], 1.]).reshape(1, -1)
+              ), 0))
+          if abs(det) < epsilon:
+              pruned_path.remove(pruned_path[i+1])
+          else:
+              i +=1
+      pruned_path = [tuple(p) for p in pruned_path]
+      return pruned_path
 
 
 
