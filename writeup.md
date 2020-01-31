@@ -79,6 +79,9 @@ Finally, the waypoints are send to the simulator and the drone transitions to ta
 
 ### Implementing Your Path Planning Algorithm
 
+I implemented the minimum requirement solution in *01_grid_based_astar_diagonal.py*
+
+
 #### 1. Set your global home position
 Here students should read the first line of the csv file, extract lat0 and lon0 as floating point values and use the self.set_home_position() method to set global home. Explain briefly how you accomplished this in your code.
 
@@ -128,11 +131,11 @@ In order to make sure that the specified goal location is valid, i created a met
 And here the function implemented in planning_utils.py:
 
     def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
-        
+
       if (p[0]<0 or p[0]>g.shape[0]-1 or
           p[1]<0 or p[1]>g.shape[1]-1 or
           g[p[0]][p[1]]):
-          
+
           print('Invalid goal location. Looking for nearby location..')
           
           is_valid = False
@@ -148,7 +151,7 @@ And here the function implemented in planning_utils.py:
           else:
               p = s
               print('..found no valid goal. Resetting goal to current location: {}'.format(p))
-              
+
       return p
 
 
@@ -179,7 +182,7 @@ and added conditional checks for removing those actions from the valid_actions l
 #### 6. Cull waypoints 
 For this step you can use a collinearity test or ray tracing method like Bresenham. The idea is simply to prune your path of unnecessary waypoints. Explain the code you used to accomplish this step.
 
-I wrote a function for remove waypoints using collinearity checks:
+I wrote a function for removing waypoints using collinearity checks:
 
      path = path_pruning(path, epsilon=0.1)
 
