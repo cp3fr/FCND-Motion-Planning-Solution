@@ -184,7 +184,7 @@ def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
     if (p[0]<0 or p[0]>g.shape[0]-1 or
         p[1]<0 or p[1]>g.shape[1]-1 or
         g[p[0]][p[1]]):
-        print('\nError: Specified goal is invalid. Looking for nearby location..\n')
+        print('Invalid goal location. Looking for nearby location..')
         
         is_valid = False
         i = 0
@@ -244,5 +244,65 @@ def find_valid_grid_location(p, g, r = 10):
         return list(locs.keys())[0]
     else:
         return []
+
+
+def waypoints_from_path_and_altitude(path, altitude, local_position, north_offset, east_offset, heading=True):
+    '''
+    Generates a list of waypoints [ [int(x), int(y), int(z), angle], ... ] from
+    path:  2d grid coordinates in a list [ (x, y), ...]
+    altitude:  fixed altitude z
+    local_position:   current local position 
+    north_offset, east_offset:  x and y offesets of the grid origin from local NED frame
+    heading:   whether or not to orient the quadrotor towards the next waypoint
+    '''
+
+    waypoints = []
+
+    #loop over waypoints
+    for i in range(len(path)):
+        
+        #previous location
+        if i==0:  
+            p0 = np.array([ local_position[0], local_position[1] ]) 
+        else:
+            p0 = np.array([  path[i-1][0] + north_offset, path[i-1][1] + east_offset ]) 
+
+        #current location
+        p1 = np.array([ path[i][0] + north_offset, path[i][1] + east_offset ])  
+
+        #unit vector from translation from previous to current location
+        v01 =  p1 - p0               
+        v01 = v01 / np.linalg.norm(v01)
+
+        #unit vector pointing into north direction
+        vref = np.array([1.,0.])     
+        vref = vref / np.linalg.norm(vref)
+
+        #angle between translation vector and north (note: it's the smallest angle, between 0-pi radians or 0-180 deg)
+        angle = np.arccos(np.dot(vref, v01))
+
+        #check rotation direction: clockwise/positive (default) for translations to the east and
+        #counterclockwise/negative for translations to the west
+        if v01[1]<0:
+            angle = -angle
+
+        #append waypoint locations (integers) and rotation angle (in radians, relative to north)
+        waypoints.append([ int(p1[0]), int(p1[1]), int(altitude), angle])
+
+
+    return waypoints
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

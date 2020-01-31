@@ -27,55 +27,28 @@ You're reading it! Below I describe how I addressed each rubric point and where 
 ### Explain the Starter Code
 
 #### 1. Explain the functionality of what's provided in `motion_planning.py` and `planning_utils.py`
+These scripts contain a basic planning implementation that includes:
 
-I will focus on describing the starter code in plan_path() and planning_utils.py, which are called after the quadrotor has been armed.
-In plan_path(), two hardcoded variables specify the flight altitude and the minimum safety distance to obstacles:
+(1) A grid representation of 2D configuration space with 1x1m cell size, based on obstacle information in 'colliders.csv' (motion_planning.py, line 133), for a 5-m altitude given by 'TARGET_ALTITUDE' (motion_planning.py, line 117) and considering a 5-m safety distance to obstacles given by 'SAFETY_DISTANCE' (motion_planning.py, line 118).
 
-    TARGET_ALTITUDE = 5
-    SAFETY_DISTANCE = 5
+(2) A specification of start and goal locations within the 2D grid, where start is at grid center and goal is 10 m to the north and east of the start (motion_planning.py, lines 139 and 143).
 
-Next, obstacle information is read from a .csv file:
+(3) The use of A* for planning a trajectory in 2D configuration space from start to goal (planning_utils.py, line 45). 
 
-    data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
+(4) Possible actions are linear translations to adjacent cells in west, east, north, or south direction (planning_utils.py, lines 54-57) specified by three-number tuples: The first two values indicate the delta between current and next position in north and east direction (possible values: -1, 0, 1). The third value indicates the cost of performing the action (value of 1 in all cases).
 
-These data are used for creating a 2D grid representation of configuration space at the target altitude and adding the specified safety distance to obstacle borders. Note that a fixed 1x1 m cell size is used:
+(5) No path pruning (e.g. test for collinearity, bresenham algorithm) is applied. Instead the path from start to goal, identified by A* , consists of many waypoints in linearly adjacent cells (motion_planning.py, line 155). Because of this and because no diagonal actions are possible, there is a visible zig-zag trajectory along many waypoints in the simulation.
 
-    grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+(6) As compared to backyard_flyer_solution.py, motion_planning.py has some changes to how grid-based A* planning is implemented. Those include:
 
-The grid variable represents configuration space, where free space is marked as False and occupied space as True. north_offset and east_offset represent the grid offset in local ECEF coordinates.
-
-Next, the start location is set to the grid center location, and the goal to a location 10 meters north and east of that location
-
-    grid_start = (-north_offset, -east_offset)
-    grid_goal = (-north_offset + 10, -east_offset + 10)
-
-Subsequently, the path from start to goal within the 2D grid is planned using A* :
-
-    path, _ = a_star(grid, heuristic, grid_start, grid_goal)
-
-using as a heuristic the euclidian distance:
-
-    def heuristic(position, goal_position):
-        return np.linalg.norm(np.array(position) - np.array(goal_position))
-
-and allowing as actions only 1-m translations to adjacent cells in either west, east, north, or south direction:
-
-    WEST = (0, -1, 1)
-    EAST = (0, 1, 1)
-    NORTH = (-1, 0, 1)
-    SOUTH = (1, 0, 1)
-
-Because no diagonal actions are allowed, the planned path follows a zig-zag trajectory with many waypoints to the goal.
-
-No path pruning is applied.
-
-After that, the 2D waypoints in grid space are converted to 3D waypoints in ECEF local coordinates, by adding north_offset and east_offset to x an y repectively, and using the target altitude for z. Also, heading for all waypoints specified as a zero angle with respect to the north direction:
-
-    waypoints = [[p[0] + north_offset, p[1] + east_offset, TARGET_ALTITUDE, 0] for p in path]
-
-Finally, the waypoints are send to the simulator and the drone transitions to takeoff.
-
-
+- An additional state 'PLANNING' (line 22), that is initiated after arming the quadrotor (line 67) via the method 'plan_path' (line 114)
+- When planning state is completed, the takeoff_transition is initiated (line 68)
+- The 'plan_path' method (line 114) creates the configuration space representation, plans the path from start to goal, and defines the waypoints
+- An additional 'send_waypoints' method (line 109) for sending waypoints to the simulator
+- In the 'waypoint_transition' method (line 85), self.cmd_position now receives the heading direction parameter from self.target_position[3]
+- The 'calculate_box' method for defining the quadratic waypoints in backyard_flyer_solution.py (line 72) has been removed from motion_planning.py
+- In the 'arming_transition' method (motion_planning.py, line 74), no home position, and in 'takeoff_transition' method (motion_planning.py, line 80) no target altitude are specified anymore.
+- MavLinkConnection arguments are provided by 'argparse.ArgumentParser' (line 175), and time.sleep is reduced to 1 second (line 182).
 
 
 
