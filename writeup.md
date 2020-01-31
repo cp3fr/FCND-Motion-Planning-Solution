@@ -123,30 +123,33 @@ Taking some longitude and latitude location as input, i convert these geodetic c
 
 In order to make sure that the specified goal location is valid, i created a method that checks the grid location, and if it collides with occupied space, searches for the nearest unoccupied location and sets this as the corrected goal location:
 
-  grid_goal = grid_goal_verification(grid_goal, grid_start, grid)  
+    grid_goal = grid_goal_verification(grid_goal, grid_start, grid)  
 
 And here the function implemented in planning_utils.py:
 
-  def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
-    if (p[0]<0 or p[0]>g.shape[0]-1 or
-        p[1]<0 or p[1]>g.shape[1]-1 or
-        g[p[0]][p[1]]):
-        print('Invalid goal location. Looking for nearby location..')
+    def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
         
-        is_valid = False
-        i = 0
-        while is_valid==False or i<len(r):
-            new_p = find_valid_grid_location(p, g, r = r[i])
-            if len(new_p)>0:
-                p=new_p
-                is_valid = True
-            i+=1
-        if is_valid:
-            print('..found a valid goal: {}'.format(p))
-        else:
-            p = s
-            print('..found no valid goal. Resetting goal to current location: {}'.format(p))
-    return p
+      if (p[0]<0 or p[0]>g.shape[0]-1 or
+          p[1]<0 or p[1]>g.shape[1]-1 or
+          g[p[0]][p[1]]):
+          
+          print('Invalid goal location. Looking for nearby location..')
+          
+          is_valid = False
+          i = 0
+          while is_valid==False or i<len(r):
+              new_p = find_valid_grid_location(p, g, r = r[i])
+              if len(new_p)>0:
+                  p=new_p
+                  is_valid = True
+              i+=1
+          if is_valid:
+              print('..found a valid goal: {}'.format(p))
+          else:
+              p = s
+              print('..found no valid goal. Resetting goal to current location: {}'.format(p))
+              
+      return p
 
 
 
