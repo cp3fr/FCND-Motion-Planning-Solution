@@ -354,9 +354,14 @@ For development purposes, i made a command-line visualization of the current 2D 
     ........................................
     ........................................
 
-By the way, i also added a heading command that orients the drone toward the next waypoint in
+By the way, i also added a heading command that orients the drone toward the next waypoint in the function `waypoints_from_path()` implemented in `receding_horizon_utils.py` and called as follows:
+
+        self.waypoints = waypoints_from_path(path, self.local_position[:2], heading=True)
+
 
 I have tested the alogrithm in many different scenarios. It seems that for graph-based planning in a satic environment there are very few collisions, thus the local planning may be beneficial for different (more dynamic) environments or using a more basice (e.g. breadth-first search) initial coarse path definition.
+
+Hav fun trying it :)
 
 
 
