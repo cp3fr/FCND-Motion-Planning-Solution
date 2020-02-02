@@ -4,13 +4,12 @@ import msgpack
 from enum import Enum, auto
 
 import numpy as np
-import math
 
-from planning_utils import a_star, heuristic, create_grid, path_pruning, grid_goal_verification
+from planning_utils import a_star, heuristic, create_grid
 from udacidrone import Drone
 from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
-from udacidrone.frame_utils import global_to_local, local_to_global
+from udacidrone.frame_utils import global_to_local
 
 
 class States(Enum):
@@ -88,11 +87,7 @@ class MotionPlanning(Drone):
         print("waypoint transition")
         self.target_position = self.waypoints.pop(0)
         print('target position', self.target_position)
-        self.cmd_position(
-            self.target_position[0], 
-            self.target_position[1], 
-            self.target_position[2], 
-            self.target_position[3])
+        self.cmd_position(self.target_position[0], self.target_position[1], self.target_position[2], self.target_position[3])
 
     def landing_transition(self):
         self.flight_state = States.LANDING
@@ -118,67 +113,49 @@ class MotionPlanning(Drone):
 
     def plan_path(self):
         self.flight_state = States.PLANNING
-
         print("Searching for a path ...")
-
-        # Use more than 5m safety distance to work well with the simulator
-        SAFETY_DISTANCE = 7
-
-        # Set target altitude
         TARGET_ALTITUDE = 5
+        SAFETY_DISTANCE = 5
 
-        # Set target position (really needed?)
         self.target_position[2] = TARGET_ALTITUDE
 
-        # Read home latitude and longitude from colliders.csv
-        (lat0, lon0) = [ np.float64(s.split(' ')[1]) for s in 
-            np.loadtxt('colliders.csv', delimiter='\n', dtype='str')[0].split(', ') ]
-        print('gobal home latitude = {} and longitude = {}'.format(lat0, lon0))
+        # TODO: read lat0, lon0 from colliders into floating point values
         
-        # Set home position to (lon0, lat0, 0)
-        self.set_home_position(lon0, lat0, 0.)
+        # TODO: set home position to (lon0, lat0, 0)
 
-        # Compute current local position from drone latitude, longitude and altitude
-        local_position = global_to_local((self._longitude, self._latitude, self._altitude), self.global_home)
-        print('current local position: {}'.format(local_position))
+        # TODO: retrieve current global position
+ 
+        # TODO: convert to current local position using global_to_local()
         
+        print('global home {0}, position {1}, local position {2}'.format(self.global_home, self.global_position,
+                                                                         self.local_position))
+        # Read in obstacle map
+        data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
+        
+        # Define a grid for a particular altitude and safety margin around obstacles
+        grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+        print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
+        # Define starting point on the grid (this is just grid center)
+        grid_start = (-north_offset, -east_offset)
+        # TODO: convert start position to current position rather than map center
+        
+        # Set goal as some arbitrary position on the grid
+        grid_goal = (-north_offset + 10, -east_offset + 10)
+        # TODO: adapt to set goal as latitude / longitude position and convert
 
-        #append last waypoint (must be integers)
-        waypoints = []
-        waypoints.append([int(local_position[0]+ 1), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.   ])
-        waypoints.append([int(local_position[0]+ 2), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.1  ])
-        waypoints.append([int(local_position[0]+ 3), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.2  ])
-        waypoints.append([int(local_position[0]+ 4), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.3  ])
-        waypoints.append([int(local_position[0]+ 5), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.4  ])
-        waypoints.append([int(local_position[0]+ 6), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.5  ])
-        waypoints.append([int(local_position[0]+ 7), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.6  ])
-        waypoints.append([int(local_position[0]+ 8), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.7  ])
-        waypoints.append([int(local_position[0]+ 9), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.8  ])
-        waypoints.append([int(local_position[0]+10), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.9  ])
-        waypoints.append([int(local_position[0]+11), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -1.0  ])
-        waypoints.append([int(local_position[0]+12), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.1  ])
-        waypoints.append([int(local_position[0]+13), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.2  ])
-        waypoints.append([int(local_position[0]+14), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.3  ])
-        waypoints.append([int(local_position[0]+15), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.4  ])
-        waypoints.append([int(local_position[0]+16), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.5  ])
-        waypoints.append([int(local_position[0]+17), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.6  ])
-        waypoints.append([int(local_position[0]+18), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.7  ])
-        waypoints.append([int(local_position[0]+19), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.8  ])
-        waypoints.append([int(local_position[0]+20), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.9  ])
-        waypoints.append([int(local_position[0]+ 0), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  2.0  ])
+        # Run A* to find a path from start to goal
+        # TODO: add diagonal motions with a cost of sqrt(2) to your A* implementation
+        # or move to a different search space such as a graph (not done here)
+        print('Local Start and Goal: ', grid_start, grid_goal)
+        path, _ = a_star(grid, heuristic, grid_start, grid_goal)
+        # TODO: prune path to minimize number of waypoints
+        # TODO (if you're feeling ambitious): Try a different approach altogether!
 
-        print('waypoints plus heading:\n{}'.format(waypoints))
-        print('waypoints:\n{}'.format(waypoints))
-        print('type(waypoints) ',type(waypoints))
-        print('type(waypoints[0][0]) ',type(waypoints[0][0]))
-        print('type(waypoints[0][1]) ',type(waypoints[0][1]))
-        print('type(waypoints[0][2]) ',type(waypoints[0][2]))
-        print('type(waypoints[0][3]) ',type(waypoints[0][3]))
-
+        # Convert path to waypoints
+        waypoints = [[p[0] + north_offset, p[1] + east_offset, TARGET_ALTITUDE, 0] for p in path]
         # Set self.waypoints
         self.waypoints = waypoints
-        
-        # Send waypoints to sim (this is just for visualization of waypoints)
+        # TODO: send waypoints to sim (this is just for visualization of waypoints)
         self.send_waypoints()
 
     def start(self):

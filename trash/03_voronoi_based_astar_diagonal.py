@@ -2,6 +2,7 @@ import argparse
 import time
 import msgpack
 from enum import Enum, auto
+import networkx as nx
 
 import numpy as np
 import math
@@ -138,45 +139,58 @@ class MotionPlanning(Drone):
         # Set home position to (lon0, lat0, 0)
         self.set_home_position(lon0, lat0, 0.)
 
-        # Compute current local position from drone latitude, longitude and altitude
-        local_position = global_to_local((self._longitude, self._latitude, self._altitude), self.global_home)
-        print('current local position: {}'.format(local_position))
-        
         # Read in obstacle map
         data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
-        
-        # Define a grid for a particular altitude and safety margin around obstacles
-        grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
-        print('grid north offset = {0}, east offset = {1}\n'.format(north_offset, east_offset))
+
+        print('..getting voronoi edges')
+        _, edges = create_grid_and_edges(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+
+        print('..making the graph')
+        g = nx.Graph()
+        for e in edges:
+            e = np.array(e).astype(int)
+            dist = np.sqrt((e[0][0] - e[1][0])**2 + (e[0][1] - e[1][1])**2)
+            g.add_edge(tuple(e[0]), tuple(e[1]), weight=dist)
+
 
         # Use local position as start location
-        grid_start = (int(self.local_position[0] - north_offset), 
-                      int(self.local_position[1] - east_offset))
-        print('grid start location: {}'.format(grid_start))
+        grid_start = self.local_position
+        print('start: {}'.format(grid_start))
 
         # Set goal location by longitude and latitude
-        (lat, lon) =(37.793448, -122.398147)
-        # (lat, lon) =(37.793614, -122.396895)
+        # (lat, lon) =(37.793448, -122.398147)
+        (lat, lon) =(37.793614, -122.396895)6
+
 
         # Convert goal location from geodetic to grid frame
         local_goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)
-        grid_goal = (int(local_goal[0] - north_offset), 
-                     int(local_goal[1] - east_offset))
-        print('grid goal location: {}'.format(grid_goal))
+        grid_goal = local_goal
+        print('goal:  {}'.format(grid_goal))
 
-        # Check if goal location is valid, if not find a valid one
-        grid_goal = grid_goal_verification(grid_goal, grid_start, grid)
+        #find closest nodes for start and goal
+        print('..find nodes closest to start and goal location')
+        nodes = list(g.nodes())
 
-        # Run A* modified for using diagonal motion to find a path from start to goal
-        path, _ = a_star(grid, heuristic, grid_start, grid_goal)
-        print('path found by A*:\n{}'.format(path))
+        idx = np.array([ np.linalg.norm(np.array(grid_start[:2])-np.array(n)) for n in nodes ]).argmin() 
+        start = nodes[idx]
+
+        idx = np.array([ np.linalg.norm(np.array(grid_goal[:2])-np.array(n)) for n in nodes ]).argmin() 
+        goal = nodes[idx]
+
+        print('start node: {}'.format(start))
+        print('goal node:  {}'.format(goal))
+
+        #run a*
+        print('..run astar graph version')
+        path, _ = a_star_graph(g, heuristic, start, goal)
+        print('path before pruning: {}\n'.format(path))
 
         # Prune path to reduce the number of waypoints
         path = path_pruning(path, epsilon=0.1)
         print('path after pruning:\n{}'.format(path))
 
         # Convert path to waypoints
-        waypoints = waypoints_from_path_and_altitude(path, TARGET_ALTITUDE, self.local_position, north_offset, east_offset, heading=True)
+        waypoints = waypoints_from_path_and_altitude(path, TARGET_ALTITUDE, self.local_position, 0., 0., heading=True)
         print('waypoints:\n{}'.format(waypoints))
 
         # Set self.waypoints

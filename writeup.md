@@ -28,79 +28,101 @@ You're reading it! Below I describe how I addressed each rubric point and where 
 
 #### 1. Explain the functionality of what's provided in `motion_planning.py` and `planning_utils.py`
 
-I will focus on describing the starter code in plan_path() and planning_utils.py, which are called after the quadrotor has been armed.
-In plan_path(), two hardcoded variables specify the flight altitude and the minimum safety distance to obstacles:
+I will describe the functionality of `plan_path()` and `planning_utils.py`, which are called after the quadrotor has been armed.
+In `plan_path()`, two local variables specify the flight altitude and the minimum safety distance to obstacles in meters:
 
     TARGET_ALTITUDE = 5
     SAFETY_DISTANCE = 5
 
-Next, obstacle information is read from a .csv file:
+Obstacle information is read from the file `colliders.csv`:
 
     data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
 
-These data are used for creating a 2D grid representation of configuration space at the target altitude and adding the specified safety distance to obstacle borders. Note that a fixed 1x1 m cell size is used:
+Next, a 2D grid representation of configuration space for the specified target altitude is created based on obstacle information from `data` and by adding the specified safety distance to obstacle borders. Cell size in the grid is 1x1 meters.
 
     grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
 
-The grid variable represents configuration space, where free space is marked as False and occupied space as True. north_offset and east_offset represent the grid offset in local ECEF coordinates.
+The variable `grid` represents the 2D configuration space, where free space is marked as False and occupied space as True. The variables `north_offset` and `east_offset` represent grid offset in local ECEF coordinates.
 
-Next, the start location is set to the grid center location, and the goal to a location 10 meters north and east of that location
+Next, the start and goal locations for the mission are specified by setting the start to grid center and goal 10 meters north and east of that location:
 
     grid_start = (-north_offset, -east_offset)
     grid_goal = (-north_offset + 10, -east_offset + 10)
 
-Subsequently, the path from start to goal within the 2D grid is planned using A* :
+After that, a path from start to goal is planned using A* :
 
     path, _ = a_star(grid, heuristic, grid_start, grid_goal)
 
-using as a heuristic the euclidian distance:
+whereby euclidian distance serves as a heuristic:
 
     def heuristic(position, goal_position):
         return np.linalg.norm(np.array(position) - np.array(goal_position))
 
-and allowing as actions only 1-m translations to adjacent cells in either west, east, north, or south direction:
+and there are four possible actions: 1-m horizontal translations (to adjacent cells) in either west, east, north, or south direction:
 
     WEST = (0, -1, 1)
     EAST = (0, 1, 1)
     NORTH = (-1, 0, 1)
     SOUTH = (1, 0, 1)
 
-Because no diagonal actions are allowed, the planned path follows a zig-zag trajectory with many waypoints to the goal.
+No diagonal actions are allowed, and no path pruning is applied, thus the planned path follows a zig-zag trajectory with many waypoints leading from start to  goal.
 
-No path pruning is applied.
-
-After that, the 2D waypoints in grid space are converted to 3D waypoints in ECEF local coordinates, by adding north_offset and east_offset to x an y repectively, and using the target altitude for z. Also, heading for all waypoints specified as a zero angle with respect to the north direction:
+After that, the planned path in 2D configuration space is been converted to 3D local coordinates, by adding `north_offset` and `east_offset` to x an y coordinates repectively, and using the `TARGET_ALTITUDE` for z. A heading angle of 0 (north direction) is used for all waypoints:
 
     waypoints = [[p[0] + north_offset, p[1] + east_offset, TARGET_ALTITUDE, 0] for p in path]
 
-Finally, the waypoints are send to the simulator and the drone transitions to takeoff.
+Finally, the waypoints are send to the simulator and the drone transitions to takeoff:
+
+    self.send_waypoints()
+
+
 
 
 
 ### Implementing Your Path Planning Algorithm
 
-I implemented the minimum requirement solution in *01_grid_based_astar_diagonal.py*
+I implemented three solutions for the planning problem
+
+(1) __Simple grid-based solution:__ 
+
+This is the minimum requirement for passing the assignment, i.e. adding diagonal actions, setting start location to current location, setting goal location in geodetic coordinates, and adding path pruning using collinearity check. To run the code type in commandline:
+
+    `python grid_astar.py`
+
+
+(2) __Probabilistic roadmap:__ 
+
+This is a graph-based solution using a 2.5D configuration space representation, random sampling, A* modified for graphs, and path pruning. To run the code type in commandline:
+
+    `probabilistic_roadmap.py`
+
+
+(3) __Receding horizon:__
+
+This is probably the most interesting solution, which uses graph-based search for finding a coarse path (same as for probabilistic roadmap), and while executing the path, performs local obstacle detection and re-planning if needed. I will answer the rubric points below regarding this solution. To run the code type in commandline:
+
+    `python receding_horizon.py`
+
 
 
 #### 1. Set your global home position
 Here students should read the first line of the csv file, extract lat0 and lon0 as floating point values and use the self.set_home_position() method to set global home. Explain briefly how you accomplished this in your code.
 
-I read colliders.csv as string and convert the values in the first row to latitude and longitude as float:
+I read the first line from `colliders.csv` as a string, split it and converted the latitude and longitude values to float as follows:
 
     (lat0, lon0) = [ np.float64(s.split(' ')[1]) for s in 
     np.loadtxt('colliders.csv', delimiter='\n', dtype='str')[0].split(', ') ]
         
-Next, I set the global home position to these latitude and longitude coordinates and an altitude of zero (at the ground):
+After that, I used these values and a zero altitude (ground floor) to set the global home position as follows:
 
     self.set_home_position(lon0, lat0, 0.)
-
 
 
 
 #### 2. Set your current local position
 Here as long as you successfully determine your local position relative to global home you'll be all set. Explain briefly how you accomplished this in your code.
 
-I can either use *self.local_position* or the  *global_to_local()* function from frame_utils.py to convert current global position to local position:
+This can be done by typing `self.local_position` or by using the `global_to_local()` function :
 
     local_position = global_to_local((self._longitude, self._latitude, self._altitude), self.global_home)
 
@@ -109,84 +131,106 @@ I can either use *self.local_position* or the  *global_to_local()* function from
 #### 3. Set grid start position from local position
 This is another step in adding flexibility to the start location. As long as it works you're good to go!
 
-I set grid_start to the current local position, which needs to be given as integer values to work:
+Since for the receding horizon solution I do not use grid-based configuration space, I initially set the start location to the current local position, and later on when the random sampling-based graph is defined, i search for the closest node in the graph to update the start location as follows:
 
-    grid_start = (int(self.local_position[0] - north_offset), int(self.local_position[1] - east_offset))
+    start = self.local_position      # setting start location to current location position in NED coordinates
+    start = closest_point(g, start)  # searching for the closest node to start location in graph `g`
+
+The function `closest_point()` is implemented in `receding_horizon_utils.py` and uses a KDTree of nodes for rapid query:
+
+    def closest_point(g, p):
+        """
+        Compute the closest point in the graph `g`
+        to the current point `p`.
+        """
+        
+        nodes = [n for n in g.nodes]
+           
+        tree = KDTree(nodes)
+        idx = tree.query([p], k=1, return_distance=False)[0][0]
+        return nodes[idx]
 
 
 
 #### 4. Set grid goal position from geodetic coords
 This step is to add flexibility to the desired goal location. Should be able to choose any (lat, lon) within the map and have it rendered to a goal location on the grid.
 
-Taking some longitude and latitude location as input, i convert these geodetic coordinates, together with the target altitude to local coordinates, and subsequently to grid coordinates: 
+Using geodetic longitude and latitude of some location, I convert these coordinates along with the negative (!) target altitude (because of the downward direction of the z-axis in NED coordinates) to local coordinates and subsequently search for the closest node in the graph to update the goal location as follows: 
 
-    (lat, lon) =(37.793448, -122.398147)
-    local_goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)
-    grid_goal = (int(local_goal[0] - north_offset), int(local_goal[1] - east_offset))
-
-In order to make sure that the specified goal location is valid, i created a method that checks the grid location, and if it collides with occupied space, searches for the nearest unoccupied location and sets this as the corrected goal location:
-
-    grid_goal = grid_goal_verification(grid_goal, grid_start, grid)  
-
-And here the function implemented in planning_utils.py:
-
-    def grid_goal_verification(p, s, g, r=[10, 20, 40, 80]):
-
-      if (p[0]<0 or p[0]>g.shape[0]-1 or
-          p[1]<0 or p[1]>g.shape[1]-1 or
-          g[p[0]][p[1]]):
-
-          print('Invalid goal location. Looking for nearby location..')
-          
-          is_valid = False
-          i = 0
-          while is_valid==False or i<len(r):
-              new_p = find_valid_grid_location(p, g, r = r[i])
-              if len(new_p)>0:
-                  p=new_p
-                  is_valid = True
-              i+=1
-          if is_valid:
-              print('..found a valid goal: {}'.format(p))
-          else:
-              p = s
-              print('..found no valid goal. Resetting goal to current location: {}'.format(p))
-
-      return p
+    (lat, lon) = (37.793373, -122.398809)  #some location on california street
+    goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)  #convert geodetic to local coordinates
+    goal = closest_point(g, goal)  #find closest node to goal loaction the graph `g`
 
 
 
 #### 5. Modify A* to include diagonal motion (or replace A* altogether)
 Minimal requirement here is to modify the code in planning_utils() to update the A* implementation to include diagonal motions on the grid that have a cost of sqrt(2), but more creative solutions are welcome. Explain the code you used to accomplish this step.
 
-I simply added four diagonal actions to the Action class:
+This is not necessary for the graph-based solution (however see `grid_astar_utils.py` for a modification of grid-based astar). For my solution, i modified A* to work with graphs, and giving a weight of 1 for every transition to a connected node. The algorithm is implemented in `receding_horizon_utils.py`:
 
-    NORTH_WEST = (-1, -1, np.sqrt(2))
-    NORTH_EAST = (-1, 1, np.sqrt(2))
-    SOUTH_WEST = (1, -1, np.sqrt(2))
-    SOUTH_EAST = (1, 1, np.sqrt(2))
+    #method for running A* on a graph
+    def a_star_graph(graph, h, start, goal):
+        """Modified A* to work with NetworkX graphs."""
+        
+        path = []
+        queue = PriorityQueue()
+        queue.put((0, start))
+        visited = set(start)
+                
+        branch = {}
+        found = False
+        
+        while not queue.empty():
+            item = queue.get()
+            current_cost = item[0]
+            current_node = item[1]
+                  
+            if current_node == goal:        
+                print('Found a path.')
+                found = True
+                break
+            else:
+                for next_node in graph[current_node]:
+                    cost = graph.edges[current_node, next_node]['weight']
+                    new_cost = current_cost + cost + h(next_node, goal)
+                    
+                    if next_node not in visited:                
+                        visited.add(next_node)               
+                        queue.put((new_cost, next_node))
+                        
+                        branch[next_node] = (new_cost, current_node)
+                 
+        path = []
+        path_cost = 0
+        if found:
+            
+            # retrace steps
+            path = []
+            n = goal
+            path_cost = branch[n][0]
+            while branch[n][1] != start:
+                path.append(branch[n][1])
+                n = branch[n][1]
+            path.append(branch[n][1])
+                
+        return path[::-1], path_cost
 
-and added conditional checks for removing those actions from the valid_actions list in the valid_actions function:
+I am using euclidian distance as a heuristic:
 
-    if (x - 1 < 0 or y - 1 < 0) or grid[x - 1, y - 1] == 1:
-      valid_actions.remove(Action.NORTH_WEST)
-    if (x - 1 < 0 or y + 1 > m) or grid[x - 1, y + 1] == 1:
-      valid_actions.remove(Action.NORTH_EAST)
-    if (x + 1 > n or y - 1 < 0) or grid[x + 1, y - 1] == 1:
-      valid_actions.remove(Action.SOUTH_WEST)
-    if (x + 1 > n or y + 1 > m) or grid[x + 1, y + 1] == 1:
-      valid_actions.remove(Action.SOUTH_EAST)
+    def heuristic(position, goal_position):
+        return np.linalg.norm(np.array(position) - np.array(goal_position))
 
 
 
 #### 6. Cull waypoints 
 For this step you can use a collinearity test or ray tracing method like Bresenham. The idea is simply to prune your path of unnecessary waypoints. Explain the code you used to accomplish this step.
 
+
 I wrote a function for removing waypoints using collinearity checks:
 
      path = path_pruning(path, epsilon=0.1)
 
-And here the function implemented in planning_utils.py. I iteratively check three subsequent points for collinearity and given a certain threshold (epsilon) remove the middle point:
+And here the function implemented in `receding_horizon_utils.py`. I iteratively check three subsequent points for collinearity and given a certain threshold (epsilon) remove the middle point:
 
     def path_pruning(path, epsilon=1e-3):
       i=0
@@ -204,16 +248,117 @@ And here the function implemented in planning_utils.py. I iteratively check thre
       pruned_path = [tuple(p) for p in pruned_path]
       return pruned_path
 
+Of note: In my tests this has not been neither necessary nor effective, since graph-based paths using a sparse distribution of nodes are used for reducing computational cost.
+
 
 
 ### Execute the flight
 #### 1. Does it work?
-It works!
+
+It works, well most of the time, depending on the chosen start and goal locations and the number of nodes chosen.
+
 
 ### Double check that you've met specifications for each of the [rubric](https://review.udacity.com/#!/rubrics/1534/view) points.
   
 # Extra Challenges: Real World Planning
 
 For an extra challenge, consider implementing some of the techniques described in the "Real World Planning" lesson. You could try implementing a vehicle model to take dynamic constraints into account, or implement a replanning method to invoke if you get off course or encounter unexpected obstacles.
+
+
+I decided to implement a receding horizon solution. The key component is a novel local planning algorithm, called at regular intervals given the following sampling rate:
+
+    self.sr_local_planner = 2 # local planner sampling rate in Hz
+
+The function is called in `local_position_callback`, thus when position changes, and when time is due given the sampling rate as follows:
+
+    def local_position_callback(self):
+            
+        [...]
+             
+        if self.flight_state == States.WAYPOINT:
+              
+          [...]
+                 
+          #this is the current time
+          self.t1 = time.time()   
+           
+          #run local planning if time is due
+          if self.t1 - self.t0 > 1 / self.sr_local_planner:   
+                   
+              #set past time to current time
+              self.t0 = self.t1
+                 
+              #run local planning
+              self.local_path_planning()
+
+
+In the following i describe what happens in `local_path_planning()`.
+
+Initially, a 2D grid representation of local space around the quadrotor is created, aclled `self.voxmap`, but note it is currently not 3D as the name may suggest. The variable `self.horizon`, specifies the x and y length in meters of the 2D grid, the object `self.sampler` contains the 2.5D global representation of obstacles on the map and `self.local_position` is the map center:
+
+    #update local map
+    self.voxmap = update_local_map(self.horizon, self.horizon,, self.local_position, self.sampler)
+
+The function `update_local_map()` is implemented in `receding_horizon_utils.py` and creates a grid representing 2D space around the quadrotor, where free space is False and occupied space is True.
+
+Next, a `local_target` is defined, which is a 2D vector from the current location to the next target location.
+
+Afte that the function `local_path_obstacle_detection()` (implemented in `receding_horizon_utils.py`) is called, which uses the 2D local grid and the bresenham algorithm for checking if in the current trajectory toward the next target_position there are any obstacles. It returns `in_collision`=True if there are any obstacles, and also returns the local path towards the next target position:
+
+    (in_collision, local_path, _) = local_path_obstacle_detection(self.voxmap, local_target)
+
+If no collisions are detected, nothing will be done, and the local planner is finished.
+
+However, if there is a collision with the local path, an interative search is started for chaning the local path. Thus the linear path in collision with an obstacle is iteratively rotated around the center point until it is no longer in collision, and then this new waypoint is added to the list of waypoints
+
+For development purposes, i made a command-line visualization of the current 2D voxmap, which shows obstacles as `o`, free space as `.`, the current position as `X` and the current local path as `P`. The visualization is called with the function `print_local_map(self.voxmap, local_path)` implemented in `receding_horizon_utils.py`. And here an example of such a local map (pretty nice!):
+
+    ....oooooooooooooooooooooooooooooooooooo
+    ....oooooooooooooooooooooooooooooooooooo
+    ....oooooooooooooooooooooooooooooooooooo
+    ....oooooooooooooooooooooooooooooooooooo
+    ....oooooooooooooooooooooooooooooooooooo
+    ..............oooooooooooooooooooooooooo
+    ..............oooooooooooooooooooooooooo
+    P.............oooooooooooooooooooooooooo
+    .P............oooooooooooooooooooooooooo
+    ..PP..........oooooooooooooooooooooooooo
+    ....P.........oooooooooooooooooooooooooo
+    .....PP.......oooooooooooooooooooooooooo
+    .......PP.....oooooooooooooooooooooooooo
+    .........P....oooooooooooooooooooooooooo
+    ..........PP..oooooooooooooooooooooooooo
+    ............P...........................
+    .............PP.........................
+    ...............PP.......................
+    .................P......................
+    ..................PP....................
+    ....................X...................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+    ........................................
+
+I have tested the alogrithm in many different scenarios. It seems that for graph-based planning in a satic environment there are very few collisions, thus the local planning may be beneficial for different (more dynamic) environments or using a more basice (e.g. breadth-first search) initial coarse path definition.
+
+
+
+
+
 
 

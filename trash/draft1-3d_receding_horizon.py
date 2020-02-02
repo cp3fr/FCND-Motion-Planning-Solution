@@ -6,7 +6,7 @@ from enum import Enum, auto
 import numpy as np
 import math
 
-from planning_utils import a_star, heuristic, create_grid, path_pruning, grid_goal_verification
+from receding_horizon_utils import *
 from udacidrone import Drone
 from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
@@ -33,6 +33,11 @@ class MotionPlanning(Drone):
         self.in_mission = True
         self.check_state = {}
 
+        self.voxmap = np.zeros((40, 40, 40), dtype=np.bool)
+        self.sampler = None
+        self.past_time = time.time()
+        self.current_time = self.past_time
+
         # initial state
         self.flight_state = States.MANUAL
 
@@ -45,13 +50,34 @@ class MotionPlanning(Drone):
         if self.flight_state == States.TAKEOFF:
             if -1.0 * self.local_position[2] > 0.95 * self.target_position[2]:
                 self.waypoint_transition()
+
         elif self.flight_state == States.WAYPOINT:
+
+
             if np.linalg.norm(self.target_position[0:2] - self.local_position[0:2]) < 1.0:
                 if len(self.waypoints) > 0:
                     self.waypoint_transition()
                 else:
                     if np.linalg.norm(self.local_velocity[0:2]) < 1.0:
                         self.landing_transition()
+
+
+            #check for collisions based on local position update and a fixed minimum time (1 sec)
+            self.current_time = time.time()
+
+            if self.current_time - self.past_time > 1.0:
+
+                self.past_time = self.current_time
+                print(self.current_time)
+
+                #check for obstacle in path within receding horizon
+                if self.local_obstacle():
+                    print('..obstacle detected, updating waypoints')
+                    #if obstacle detected
+                    self.update_waypoints()
+                else:
+                    print('..no obstacle')
+
 
     def velocity_callback(self):
         if self.flight_state == States.LANDING:
@@ -119,8 +145,6 @@ class MotionPlanning(Drone):
     def plan_path(self):
         self.flight_state = States.PLANNING
 
-        print("Searching for a path ...")
-
         # Use more than 5m safety distance to work well with the simulator
         SAFETY_DISTANCE = 7
 
@@ -133,53 +157,111 @@ class MotionPlanning(Drone):
         # Read home latitude and longitude from colliders.csv
         (lat0, lon0) = [ np.float64(s.split(' ')[1]) for s in 
             np.loadtxt('colliders.csv', delimiter='\n', dtype='str')[0].split(', ') ]
-        print('gobal home latitude = {} and longitude = {}'.format(lat0, lon0))
-        
-        # Set home position to (lon0, lat0, 0)
+       
+        # Setting home position
+        print('..setting gobal home to {} latitude, {} longitude, {} altitude'.format(lat0, lon0, 0.))
         self.set_home_position(lon0, lat0, 0.)
-
-        # Compute current local position from drone latitude, longitude and altitude
-        local_position = global_to_local((self._longitude, self._latitude, self._altitude), self.global_home)
-        print('current local position: {}'.format(local_position))
         
+        # Read in obstacle map
+        data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
 
-        #append last waypoint (must be integers)
-        waypoints = []
-        waypoints.append([int(local_position[0]+ 1), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.   ])
-        waypoints.append([int(local_position[0]+ 2), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.1  ])
-        waypoints.append([int(local_position[0]+ 3), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.2  ])
-        waypoints.append([int(local_position[0]+ 4), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.3  ])
-        waypoints.append([int(local_position[0]+ 5), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.4  ])
-        waypoints.append([int(local_position[0]+ 6), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.5  ])
-        waypoints.append([int(local_position[0]+ 7), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.6  ])
-        waypoints.append([int(local_position[0]+ 8), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.7  ])
-        waypoints.append([int(local_position[0]+ 9), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.8  ])
-        waypoints.append([int(local_position[0]+10), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -0.9  ])
-        waypoints.append([int(local_position[0]+11), int(local_position[1]), TARGET_ALTITUDE, 3.14168 * -1.0  ])
-        waypoints.append([int(local_position[0]+12), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.1  ])
-        waypoints.append([int(local_position[0]+13), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.2  ])
-        waypoints.append([int(local_position[0]+14), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.3  ])
-        waypoints.append([int(local_position[0]+15), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.4  ])
-        waypoints.append([int(local_position[0]+16), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.5  ])
-        waypoints.append([int(local_position[0]+17), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.6  ])
-        waypoints.append([int(local_position[0]+18), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.7  ])
-        waypoints.append([int(local_position[0]+19), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.8  ])
-        waypoints.append([int(local_position[0]+20), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  1.9  ])
-        waypoints.append([int(local_position[0]+ 0), int(local_position[1]), TARGET_ALTITUDE, 3.14168 *  2.0  ])
+        print('..extract polygons')
+        sampler = Sampler(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+        self.sampler = sampler
 
-        print('waypoints plus heading:\n{}'.format(waypoints))
-        print('waypoints:\n{}'.format(waypoints))
-        print('type(waypoints) ',type(waypoints))
-        print('type(waypoints[0][0]) ',type(waypoints[0][0]))
-        print('type(waypoints[0][1]) ',type(waypoints[0][1]))
-        print('type(waypoints[0][2]) ',type(waypoints[0][2]))
-        print('type(waypoints[0][3]) ',type(waypoints[0][3]))
 
-        # Set self.waypoints
-        self.waypoints = waypoints
-        
+        ## quick hack: simple path with collision
+
+        local_start = self.local_position
+        local_goal = global_to_local((-122.397882, 37.794821,  -TARGET_ALTITUDE), self.global_home)
+        if np.linalg.norm(local_start-local_goal) < 10:
+            local_goal = global_to_local((lon0, lat0, -TARGET_ALTITUDE), self.global_home)
+
+        print(local_start)
+        print(local_goal)
+
+        waypoints = [[int(local_start[0]), int(local_start[1]), int(local_start[2]), 0], [int(local_goal[0]), int(local_goal[1]), int(local_goal[2]), 0]]
+        print('waypoints: ',waypoints)
+
+
+
+        ## original probabilistic roadmap stuff
+
+        # num_samples = 150
+        # print('..sample {} points and check for collisions'.format(num_samples))
+        # nodes = sampler.sample(num_samples)
+        # print('....sampled {} points in free space'.format(len(nodes)))
+
+        # num_connections = 15
+        # print('..create graph with up to {} edges per node'.format(num_connections))
+        # g = create_graph(nodes, num_connections, sampler)
+        # print('....graph has {} nodes and {} edges'.format(len(g.nodes), len(g.edges)))
+
+        # # Use local position as start location
+        # print('..setting start and goal location')
+        # start = self.local_position
+        # print('....start: {}'.format(start))
+
+        # # Set some goal location by longitude and latitude
+        # # (lat, lon) =(lat0, lon0) #home
+        # # (lat, lon) =(37.794821, -122.397882) #FEDEX
+        # # (lat, lon) =(37.794598, -122.396599) #Hyatt
+        # # (lat, lon) =(37.793373, -122.398809) #California Street
+        # (lat, lon) =(37.793685, -122.396311) #Embarcadero Station
+        # # (lat, lon) =(37.793171, -122.396678) #Peet's Coffee
+        # # (lat, lon) =(37.796176, -122.398189) #somewhere north
+        # # (lat, lon) =(37.791822, -122.394929) #somewhere south east
+        # # (lat, lon) =(37.793448, -122.398147)
+        # # (lat, lon) =(37.793614, -122.396895)
+        # # (lat, lon) =(37.792575, -122.397441)
+        # # (lat, lon) =(37.793448, -122.398147)
+        # # (lat, lon) =(37.793982, -122.397718)
+        # # (lat, lon) =(37.793614, -122.396895)
+
+        # # Convert goal location from geodetic to grid frame
+        # goal = global_to_local((lon, lat, -TARGET_ALTITUDE), self.global_home)
+        # print('....goal:  {}'.format(goal))
+
+        # #find closest nodes for start and goal
+        # start = closest_point(g, start)
+        # goal = closest_point(g, goal)
+        # print('....start node: {}'.format(start))
+        # print('....goal node:  {}'.format(goal))
+
+        # #run a*
+        # print('..run a* on graph')
+        # path, _ = a_star_graph(g, heuristic, start, goal)
+        # if len(path)>0:
+        #     path.append(goal)
+        # print('....path found by a*: {}\n'.format(path))
+
+        # # Prune path to reduce the number of waypoints
+        # path = path_pruning(path, epsilon=0.1)
+        # print('....path after pruning:\n{}'.format(path))
+
+        # # Convert path to waypoints
+        # waypoints = waypoints_from_path(path, self.local_position, heading=True)
+        # print('....waypoints:\n{}'.format(waypoints))
+
         # Send waypoints to sim (this is just for visualization of waypoints)
+        self.waypoints = waypoints
+
         self.send_waypoints()
+
+    def local_obstacle(self):
+        #update voxmap accoring to current position
+        self.voxmap = update_voxmap(self.voxmap, self.local_position, self.sampler)
+        # m = self.voxmap[:,:,20]
+        # for row in m:
+        #     print(''.join([str(int(val)) for val in row]))
+        #check that there are no collisions in the current path
+        return check_obstacle(self.voxmap, self.target_position[:3] - self.local_position)
+
+
+
+    def update_waypoints(self):
+        print('')
+
 
     def start(self):
         self.start_log("Logs", "NavLog.txt")
