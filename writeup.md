@@ -354,6 +354,8 @@ For development purposes, i made a command-line visualization of the current 2D 
     ........................................
     ........................................
 
+By the way, i also added a heading command that orients the drone toward the next waypoint in
+
 I have tested the alogrithm in many different scenarios. It seems that for graph-based planning in a satic environment there are very few collisions, thus the local planning may be beneficial for different (more dynamic) environments or using a more basice (e.g. breadth-first search) initial coarse path definition.
 
 
